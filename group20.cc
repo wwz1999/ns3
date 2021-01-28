@@ -7,22 +7,25 @@
 #include "ns3/point-to-point-module.h"
 #include "ns3/config-store-module.h"
 #include "ns3/netanim-module.h"
+#include "math.h"
 
 using namespace ns3;
 
 int main(int argc, char *argv[])
 {
 
-  //ue  amount
+  //ue number
   uint16_t numberOfUes = 1;
-  //enb amount
-  uint16_t numberOfEnbs = 3;
+  //enb number
+  uint16_t numberOfEnbs = 16;
   //packet trans interval/ms
   double interPacketInterval = 100;
-  //length of simulate  time
+  //length of time
   double simTime = 10;
-  //enb power
+  //not konw yet
   double enbTxPowerDbm = 46.0;
+  //moving speed of ue
+  double movingSpeedOfUes = 500;
 
   //algorithm type
   std::string handoverAlgo = "A3";
@@ -38,6 +41,8 @@ int main(int argc, char *argv[])
   // Command line arguments
   CommandLine cmd;
   cmd.AddValue("simTime", "Total duration of the simulation /seconds", simTime);
+  cmd.AddValue("numberOfEnbs", "Number of the enbs", numberOfEnbs);
+  cmd.AddValue("movingSpeedOfUes", "Moving speed of the ues", movingSpeedOfUes);
   cmd.AddValue("enbTxPowerDbm", "TX power  used by HeNBs /dbm", enbTxPowerDbm);
   cmd.AddValue("handoverAlgo", "type of  handover algorithm(A3 orA2A4)", handoverAlgo);
   cmd.AddValue("hysteresis", "hysteresis of A3 algorithm", hysteresis);
@@ -113,13 +118,25 @@ int main(int argc, char *argv[])
   enbNodes.Create(numberOfEnbs);
   ueNodes.Create(numberOfUes);
 
+  //lym:dynamicly adjust moving range
+  int sqrtResult = (int)sqrt((double)numberOfEnbs);
+  if(sqrtResult * sqrtResult != numberOfEnbs) sqrtResult = sqrtResult + 1;
+  double xRange = (double)sqrtResult * 500;
+  double yRange = (double)sqrtResult * 500;
+
   // set position of enbs
+  // lym:change the layout of enbs
   MobilityHelper enbMobility;
   enbMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
-  enbMobility.SetPositionAllocator("ns3::GridPositionAllocator", "MinX", DoubleValue(500.0), "MinY",
-                                   DoubleValue(500.0), "DeltaX", DoubleValue(500));
+  enbMobility.SetPositionAllocator("ns3::GridPositionAllocator",
+                                "LayoutType", StringValue("RowFirst"), 
+                                "MinX", DoubleValue(0.0), 
+                                "MinY", DoubleValue(0.0), 
+                                "DeltaX", DoubleValue(500),
+                                "DeltaY", DoubleValue(500),
+                                "GridWidth", UintegerValue(sqrtResult));
   enbMobility.Install(enbNodes);
-
+  
   //set position of pgw
   MobilityHelper pgwMobility;
   pgwMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
@@ -131,24 +148,34 @@ int main(int argc, char *argv[])
   MobilityHelper remoteHostMobility;
   remoteHostMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
   remoteHostMobility.SetPositionAllocator("ns3::GridPositionAllocator", "MinX", DoubleValue(1400.0), "MinY",
-                                          DoubleValue(1300.0));
+                                   DoubleValue(1300.0));
   remoteHostMobility.Install(remoteHostContainer);
 
-  //make ue move
+  //make ue move 
+  //lym:random position initialize
   MobilityHelper ueMobility;
-  ueMobility.SetPositionAllocator(
-      "ns3::GridPositionAllocator", "MinX", DoubleValue(10.0), "MinY",
-      DoubleValue(10.0));
-  ueMobility.SetMobilityModel("ns3::WaypointMobilityModel");
+
+  ueMobility.SetPositionAllocator ("ns3::RandomDiscPositionAllocator",
+                             "X", StringValue ("500.0"),
+                             "Y", StringValue ("500.0"),
+                             "Rho", StringValue ("ns3::UniformRandomVariable[Min=200.0|Max=500.0]"),
+                             "Theta", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=6.2830]"));
+  // ueMobility.SetMobilityModel("ns3::WaypointMobilityModel");
+  //lym:random move model
+  //lym:modifiable moving speed
+  char speedStr[100];
+  sprintf(speedStr, "ns3::UniformRandomVariable[Min=%f|Max=%f]", movingSpeedOfUes, movingSpeedOfUes);
+  ueMobility.SetMobilityModel ("ns3::RandomWalk2dMobilityModel",
+                         "Mode", EnumValue (RandomWalk2dMobilityModel::MODE_TIME),
+                        //  "Distance", DoubleValue (300.0),
+                         "Time", TimeValue (Seconds (6.0)),
+                         "Direction", StringValue ("ns3::UniformRandomVariable[Min=0.0|Max=30.28]"),
+                         "Speed", StringValue (speedStr),
+                         "Bounds", RectangleValue (Rectangle (0.0, xRange, 0.0, yRange)));
   ueMobility.Install(ueNodes);
-  //set ue waypoints
-  Ptr<WaypointMobilityModel> waypoint = ueNodes.Get(0)->GetObject<WaypointMobilityModel>();
-  waypoint->AddWaypoint(Waypoint(Seconds(0.0), Vector(0, 400, 0.0)));
-  waypoint->AddWaypoint(Waypoint(Seconds(4.0), Vector(2000, 400, 0.0)));
-  waypoint->AddWaypoint(Waypoint(Seconds(6.0), Vector(2000, 700, 0.0)));
-  waypoint->AddWaypoint(Waypoint(Seconds(9.0), Vector(0, 700, 0.0)));
 
   // Install LTE Devices in eNB and UEs
+  Config::SetDefault("ns3::LteEnbPhy::TxPower", DoubleValue(enbTxPowerDbm));
   NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice(enbNodes);
   NetDeviceContainer ueLteDevs = lteHelper->InstallUeDevice(ueNodes);
 
@@ -213,15 +240,16 @@ int main(int argc, char *argv[])
   // Add X2 inteface
   lteHelper->AddX2Interface(enbNodes);
 
-  //enable traces
+  //enable some traces
   lteHelper->EnablePhyTraces();
   lteHelper->EnableMacTraces();
   lteHelper->EnableRlcTraces();
   lteHelper->EnablePdcpTraces();
+
   //enable  pcap  traces
   p2ph.EnablePcapAll("group20");
 
-  //not know yet
+  //not known yet
   Ptr<RadioBearerStatsCalculator> rlcStats = lteHelper->GetRlcStats();
   rlcStats->SetAttribute("EpochDuration", TimeValue(Seconds(1.0)));
   Ptr<RadioBearerStatsCalculator> pdcpStats = lteHelper->GetPdcpStats();
@@ -236,29 +264,24 @@ int main(int argc, char *argv[])
   uint32_t resourceTower;
   //Phone imig resource
   uint32_t resourcePhone;
-  resourceTower = anim.AddResource("/home/wwz/ns3/ns-allinone-3.28/ns-3.28/signalTower.png");
-  resourcePhone = anim.AddResource("/home/wwz/ns3/ns-allinone-3.28/ns-3.28/iPhone.png");
+  resourceTower = anim.AddResource("/home/matrix/ns3/ns-allinone-3.28/ns-3.28/examples/tutorial/img/tower.png");
+  resourcePhone = anim.AddResource("/home/matrix/ns3/ns-allinone-3.28/ns-3.28/examples/tutorial/img/phone.png");
   //set some attributes
   anim.UpdateNodeDescription(remoteHost, "Host");
   anim.UpdateNodeColor(remoteHost, 255, 0, 0);
   anim.UpdateNodeDescription(pgw, "LTE-PGW");
   anim.UpdateNodeColor(pgw, 255, 0, 0);
-  //sfz:update tower img
-  anim.UpdateNodeImage(2, resourceTower);
-  anim.UpdateNodeImage(3, resourceTower);
-  anim.UpdateNodeImage(4, resourceTower);
-  //sfz:update phone img
-  anim.UpdateNodeImage(5, resourcePhone);
-  //sfz:update node size
-  anim.UpdateNodeSize(2, 200, 200);
-  anim.UpdateNodeSize(3, 200, 200);
-  anim.UpdateNodeSize(4, 200, 200);
-  anim.UpdateNodeSize(5, 100, 200);
 
-  anim.UpdateNodeDescription(5, "Ue");
-  anim.UpdateNodeDescription(2, "eNB");
-  anim.UpdateNodeDescription(3, "eNB");
-  anim.UpdateNodeDescription(4, "eNB");
+  //lym:sfz:update tower img
+  for(int i = 2; i < 2 + numberOfEnbs; i ++) {
+    anim.UpdateNodeImage(i, resourceTower);
+    anim.UpdateNodeSize(i, 200, 200);
+  }
+  //lym:sfz:update phone img
+  for(int i = 2 + numberOfEnbs; i < 2 + numberOfEnbs + numberOfUes; i ++) {
+    anim.UpdateNodeImage(i, resourcePhone);
+    anim.UpdateNodeSize(i, 100, 100);
+  }
 
   Simulator::Stop(Seconds(simTime));
   Simulator::Run();
