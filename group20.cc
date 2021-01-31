@@ -270,7 +270,13 @@ int main(int argc, char *argv[])
 
   //enable  pcap  traces save the data in /IPdata
   //should create the folder first
-  p2ph.EnablePcapAll("IPdata/group20");
+  //p2ph.EnablePcapAll("IPdata/group20");
+
+  // TASK2 ENABLE PCAP TRACING
+  // related pcap files will be saved in /IPdata
+  p2ph.EnablePcap("IPdata/prefix", internetDevices);
+  p2ph.EnablePcap("IPdata/prefix", enbLteDevs);
+  p2ph.EnablePcap("IPdata/prefix", ueLteDevs);
 
   //not known yet
   Ptr<RadioBearerStatsCalculator> rlcStats = lteHelper->GetRlcStats();
